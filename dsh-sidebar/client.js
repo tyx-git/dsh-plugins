@@ -607,6 +607,38 @@ window.__ModuleLoader__.load({
       }
     }
 
+    const COMMIT_DRAFT_PREFIX = 'dsh-sidebar:commit-draft:v1:'
+
+    function commitDraftKey(sessionId) {
+      return `${COMMIT_DRAFT_PREFIX}${encodeURIComponent(sessionId)}`
+    }
+
+    function readCommitDraft(sessionId) {
+      try {
+        return window.localStorage.getItem(commitDraftKey(sessionId)) ?? ''
+      } catch {
+        return ''
+      }
+    }
+
+    function writeCommitDraft(sessionId, value) {
+      try {
+        const key = commitDraftKey(sessionId)
+        if (value.length === 0) window.localStorage.removeItem(key)
+        else window.localStorage.setItem(key, value)
+      } catch {
+        // localStorage is optional; the in-memory editor remains usable.
+      }
+    }
+
+    function clearCommitDraft(sessionId) {
+      try {
+        window.localStorage.removeItem(commitDraftKey(sessionId))
+      } catch {
+        // localStorage is optional.
+      }
+    }
+
     function useToast() {
       const [toast, setToast] = React.useState(null)
       const timer = React.useRef(0)
@@ -902,8 +934,12 @@ window.__ModuleLoader__.load({
 
     function GitPane(props) {
       const { sessionId, t, status, branches, reload } = props
-      const [message, setMessage] = React.useState('')
+      const [message, setMessage] = React.useState(() => readCommitDraft(sessionId))
       const [busy, setBusy] = React.useState('')
+
+      React.useEffect(() => {
+        setMessage(readCommitDraft(sessionId))
+      }, [sessionId])
       const [diff, setDiff] = React.useState(null)
       const [menu, setMenu] = React.useState(false)
       const [newBranch, setNewBranch] = React.useState('')
@@ -952,7 +988,10 @@ window.__ModuleLoader__.load({
         if (!canCommit) return
         const all = staged.length === 0
         void run('commit', { message: message.trim(), all }, t('git.done')).then((result) => {
-          if (result?.ok) setMessage('')
+          if (result?.ok) {
+            setMessage('')
+            clearCommitDraft(sessionId)
+          }
         })
       }
 
@@ -1087,7 +1126,11 @@ window.__ModuleLoader__.load({
                       value: message,
                       spellCheck: false,
                       placeholder: t('git.commitPlaceholder'),
-                      onChange: (event) => setMessage(event.target.value),
+                      onChange: (event) => {
+                        const value = event.target.value
+                        setMessage(value)
+                        writeCommitDraft(sessionId, value)
+                      },
                       onKeyDown: (event) => {
                         if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                           event.preventDefault()

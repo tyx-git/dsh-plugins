@@ -70,6 +70,7 @@ node test/contract-test.mjs   # porcelain -z parsing, XY→row expansion, log/br
 node test/style-test.mjs      # stylesheet balance, theme-token-only colours, class coverage
 node test/resource-test.mjs   # timer/subscription balance, cache caps, single route registration
 pwsh -NoProfile -File test/commit-untracked-regression.ps1  # untracked-file commit integration case
+node test/commit-draft-regression.mjs  # Session-scoped commit-message draft contract
 ```
 
 ## Limits
