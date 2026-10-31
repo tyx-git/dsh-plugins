@@ -188,20 +188,49 @@ function parseStatus(raw) {
  * and a printable separator keeps subjects with spaces or tabs intact.
  */
 function parseLog(raw) {
-  return raw
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .map((line) => {
-      const [hash, parents, author, when, date, subject] = line.split('\u001f')
-      return {
+  const commits = []
+  let current
+  const finish = () => {
+    if (current !== undefined) commits.push(current)
+  }
+
+  for (const rawLine of raw.split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+    if (line.trim().length === 0) continue
+    const fields = line.split('\u001f')
+    if (fields.length >= 6) {
+      finish()
+      const [hash, parents, author, when, date, subject] = fields
+      current = {
         hash,
         parents: parents ? parents.split(' ').filter(Boolean) : [],
         author,
         when,
         date,
         subject,
+        additions: 0,
+        deletions: 0,
+        files: 0,
+        fileStats: [],
       }
-    })
+      continue
+    }
+
+    if (current === undefined) continue
+    const [added, deleted, ...pathParts] = line.split('\t')
+    if (pathParts.length === 0) continue
+    const binary = added === '-' || deleted === '-'
+    const additions = binary ? 0 : Number(added) || 0
+    const deletions = binary ? 0 : Number(deleted) || 0
+    const path = pathParts.join('\t')
+    current.additions += additions
+    current.deletions += deletions
+    current.files += 1
+    current.fileStats.push({ path, additions, deletions, binary })
+  }
+
+  finish()
+  return commits
 }
 
 /** Split `git branch --format=%(refname:short)\t%(HEAD)` into branch records. */
@@ -345,7 +374,7 @@ function registerRoutes(ctx, webServer) {
     '/git/log': async (request, response, url) => {
       const cwd = cwdFor(url.searchParams.get('sessionId') ?? undefined)
       const limit = Math.min(60, Math.max(1, Number(url.searchParams.get('limit') ?? 30) || 30))
-      const run = await git(cwd, ['log', `-n${limit}`, '--date=short', `--pretty=format:${LOG_FORMAT}`])
+      const run = await git(cwd, ['log', `-n${limit}`, '--date=short', '--numstat', `--pretty=format:${LOG_FORMAT}`])
       if (!run.ok) {
         // A repository with no commit yet makes `git log` fail. That is the normal
         // empty state, not an error, and git's raw stderr must not reach the UI.

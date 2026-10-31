@@ -109,8 +109,25 @@ check('log head commit', commits[0], {
   when: '0 seconds ago',
   date: 'Sat Oct 31 14:22:33 2026 +0800',
   subject: 'second commit with 中文',
+  additions: 0,
+  deletions: 0,
+  files: 0,
+  fileStats: [],
 })
 check('root commit has no parents', commits[1].parents, [])
+
+const LOG_WITH_NUMSTAT = [
+  'abc1234\u001fparent1\u001fauthor\u001f1 minute ago\u001f2026-10-31\u001fchange files',
+  '3\t2\tsrc/app.ts',
+  '-\t-\tassets/logo.bin',
+  'def5678\u001f\u001fauthor\u001f2 minutes ago\u001f2026-10-31\u001ffirst',
+].join('\r\n')
+const detailedCommits = parseLog(LOG_WITH_NUMSTAT)
+check('commit additions parsed', detailedCommits[0].additions, 3)
+check('commit deletions parsed', detailedCommits[0].deletions, 2)
+check('commit file count parsed', detailedCommits[0].files, 2)
+check('numstat path strips Windows CR', detailedCommits[0].fileStats[0].path, 'src/app.ts')
+
 check('branch rows', parseBranches('master\t*\nfeature/x\t\n'), [
   { name: 'master', current: true },
   { name: 'feature/x', current: false },

@@ -76,6 +76,8 @@ window.__ModuleLoader__.load({
       'history.title': '图表',
       'history.empty': '当前无提交',
       'history.merge': '合并提交',
+      'history.files': '{n} 个文件',
+      'history.binary': '二进制文件',
       'browser.title': '浏览器',
       'browser.placeholder': '输入地址，如 localhost:3000',
       'browser.go': '前往',
@@ -139,6 +141,8 @@ window.__ModuleLoader__.load({
       'history.title': 'Graph',
       'history.empty': 'No commits',
       'history.merge': 'Merge commit',
+      'history.files': '{n} files',
+      'history.binary': 'binary file',
       'browser.title': 'Browser',
       'browser.placeholder': 'Enter an address, for example localhost:3000',
       'browser.go': 'Go',
@@ -513,6 +517,21 @@ window.__ModuleLoader__.load({
 .dshsb-commit-row{display:flex;align-items:flex-start;gap:7px;padding:4px 6px;border-radius:8px;
   transition:background 120ms var(--dshsb-ease)}
 .dshsb-commit-row:hover{background:var(--dsw-alias-bg-layer-2)}
+.dshsb-commit-row{cursor:pointer}
+.dshsb-commit-stats{display:flex;align-items:center;gap:7px;margin-top:2px;
+  font:var(--dsw-font-xxxs-11)}
+.dshsb-stat-add{color:var(--dsw-alias-state-success-primary)}
+.dshsb-stat-del{color:var(--dsw-alias-state-error-primary)}
+.dshsb-stat-files{color:var(--dsw-alias-label-secondary)}
+.dshsb-commit-detail{display:flex;flex-direction:column;gap:3px;margin:2px 6px 5px 25px;
+  padding:5px 8px;border-left:1px solid var(--dshsb-hair);
+  border-radius:0 7px 7px 0;background:var(--dsw-alias-bg-layer-1);
+  animation:dshsb-fade 150ms var(--dshsb-ease) both}
+.dshsb-commit-file{display:flex;align-items:center;gap:6px;min-width:0;
+  font:var(--dsw-font-xxxs-11)}
+.dshsb-commit-file-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-family:var(--dshsb-mono)}
+.dshsb-commit-file-stat{display:flex;align-items:center;gap:5px;flex:none;font-variant-numeric:tabular-nums}
 .dshsb-graph{position:relative;width:11px;flex:none;align-self:stretch}
 .dshsb-graph::before{content:"";position:absolute;left:5px;top:0;bottom:0;width:1px;
   background:var(--dshsb-hair)}
@@ -1263,6 +1282,82 @@ window.__ModuleLoader__.load({
     // ── commit graph ────────────────────────────────────────────────────────
     function HistoryPane(props) {
       const { t, commits, error, height } = props
+      const [hoveredHash, setHoveredHash] = React.useState(null)
+      const [expandedHash, setExpandedHash] = React.useState(null)
+
+      const renderCommit = (commit, index) => {
+        const additions = Number(commit.additions ?? 0) || 0
+        const deletions = Number(commit.deletions ?? 0) || 0
+        const files = Number(commit.files ?? (Array.isArray(commit.fileStats) ? commit.fileStats.length : 0)) || 0
+        const hasStats = commit.additions !== undefined || commit.deletions !== undefined || Array.isArray(commit.fileStats)
+        const expanded = expandedHash === commit.hash
+        const statsVisible = hasStats && (hoveredHash === commit.hash || expanded)
+        const fileStats = Array.isArray(commit.fileStats) ? commit.fileStats : []
+
+        return h(
+          React.Fragment,
+          { key: commit.hash },
+          h(
+            'div',
+            {
+              className: 'dshsb-commit-row',
+              'data-head': index === 0 ? '' : undefined,
+              title: `${commit.hash} · ${commit.author} · ${commit.when}`,
+              onMouseEnter: () => setHoveredHash(commit.hash),
+              onMouseLeave: () => setHoveredHash((current) => current === commit.hash ? null : current),
+              onClick: () => setExpandedHash((current) => current === commit.hash ? null : commit.hash),
+            },
+            h('span', { className: 'dshsb-graph' }, h('i')),
+            h(
+              'span',
+              { className: 'dshsb-commit-text' },
+              h('span', { className: 'dshsb-commit-subject' }, commit.subject),
+              h(
+                'span',
+                { className: 'dshsb-commit-meta' },
+                h('span', { className: 'dshsb-hash' }, commit.hash),
+                (commit.parents ?? []).length > 1
+                  ? h('span', { className: 'dshsb-merge', title: t('history.merge') }, h(Glyph.fork, { size: 9 }))
+                  : null,
+                h('span', null, commit.author),
+                h('span', { style: { opacity: 0.6 } }, commit.when),
+              ),
+              statsVisible
+                ? h(
+                    'span',
+                    { className: 'dshsb-commit-stats' },
+                    additions > 0 ? h('span', { className: 'dshsb-stat-add' }, `+${additions}`) : null,
+                    deletions > 0 ? h('span', { className: 'dshsb-stat-del' }, `-${deletions}`) : null,
+                    h('span', { className: 'dshsb-stat-files' }, t('history.files').replace('{n}', String(files))),
+                  )
+                : null,
+            ),
+          ),
+          expanded && fileStats.length > 0
+            ? h(
+                'div',
+                { className: 'dshsb-commit-detail' },
+                fileStats.map((file, fileIndex) =>
+                  h(
+                    'div',
+                    { key: `${commit.hash}:${fileIndex}`, className: 'dshsb-commit-file' },
+                    h('span', { className: 'dshsb-commit-file-name', title: file.path }, file.path),
+                    h(
+                      'span',
+                      { className: 'dshsb-commit-file-stat' },
+                      file.binary
+                        ? h('span', { className: 'dshsb-stat-files' }, t('history.binary'))
+                        : [
+                            file.additions > 0 ? h('span', { key: 'add', className: 'dshsb-stat-add' }, `+${file.additions}`) : null,
+                            file.deletions > 0 ? h('span', { key: 'del', className: 'dshsb-stat-del' }, `-${file.deletions}`) : null,
+                          ],
+                    ),
+                  )),
+              )
+            : null,
+        )
+      }
+
       return h(
         'section',
         { className: 'dshsb-pane', style: { height } },
@@ -1282,36 +1377,9 @@ window.__ModuleLoader__.load({
           { className: 'dshsb-hist-body' },
           commits.length === 0
             ? error
-              // git's own words: "no commits yet" and "not a repository" are
-              // different problems and the graph should not blur them.
               ? h('div', { className: 'dshsb-clean dshsb-clean--err' }, error)
               : h('div', { className: 'dshsb-clean' }, t('history.empty'))
-            : commits.map((commit, index) =>
-                h(
-                  'div',
-                  {
-                    key: commit.hash,
-                    className: 'dshsb-commit-row',
-                    'data-head': index === 0 ? '' : undefined,
-                    title: `${commit.hash} · ${commit.author} · ${commit.when}`,
-                  },
-                  h('span', { className: 'dshsb-graph' }, h('i')),
-                  h(
-                    'span',
-                    { className: 'dshsb-commit-text' },
-                    h('span', { className: 'dshsb-commit-subject' }, commit.subject),
-                    h(
-                      'span',
-                      { className: 'dshsb-commit-meta' },
-                      h('span', { className: 'dshsb-hash' }, commit.hash),
-                      (commit.parents ?? []).length > 1
-                        ? h('span', { className: 'dshsb-merge', title: t('history.merge') }, h(Glyph.fork, { size: 9 }))
-                        : null,
-                      h('span', null, commit.author),
-                      h('span', { style: { opacity: 0.6 } }, commit.when),
-                    ),
-                  ),
-                )),
+            : commits.map(renderCommit),
         ),
       )
     }
