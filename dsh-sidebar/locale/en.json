@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sidebar Workbench",
+    "description": "Replaces the right column with a workbench: workspace file explorer, per-session notes, git actions and a built-in browser."
+  }
+}
