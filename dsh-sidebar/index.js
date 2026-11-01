@@ -287,6 +287,35 @@ function describeEntries(entry) {
 }
 
 /**
+ * Repository name a remote URL points at, for the push row's label.
+ * Handles `https://host/org/repo(.git)` and the scp-like `git@host:org/repo`.
+ */
+function remoteRepoName(url) {
+  const raw = String(url ?? '').trim().replace(/\/+$/, '')
+  if (raw.length === 0) return ''
+  const cut = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf(':'))
+  const last = cut >= 0 ? raw.slice(cut + 1) : raw
+  return last.replace(/\.git$/i, '')
+}
+
+/**
+ * Command plan for the push button.
+ *
+ * A URL supplied by the user becomes `origin` first; when the branch has no
+ * upstream yet, the push sets one so later pushes stay plain.
+ * @returns `[command, ...args][]`, or null when the URL cannot be used.
+ */
+function pushPlan({ url, hasRemote, upstream }) {
+  const remote = String(url ?? '').trim()
+  if (remote.startsWith('-')) return null
+  if (hasRemote !== true && remote.length === 0) return null
+  const plan = []
+  if (hasRemote !== true) plan.push(['remote', 'add', 'origin', remote])
+  plan.push(upstream ? ['push'] : ['push', '--set-upstream', 'origin', 'HEAD'])
+  return plan
+}
+
+/**
  * Mount the endpoint family on the web server.
  * @param ctx - plugin context; `sessions` and `workingDirectory` are read optionally.
  * @param webServer - the browser HTTP carrier.
@@ -338,6 +367,20 @@ function registerRoutes(ctx, webServer) {
     }
   }
 
+  /** The repository's first configured remote, or null when it has none. */
+  const readRemote = async (cwd) => {
+    const run = await git(cwd, ['config', '--get-regexp', '^remote\\..*\\.url$'], 8000)
+    if (!run.ok) return null
+    const line = run.stdout.split('\n').map((entry) => entry.trim()).find(Boolean)
+    if (line === undefined) return null
+    const space = line.indexOf(' ')
+    if (space < 0) return null
+    const key = line.slice(0, space)
+    const url = line.slice(space + 1).trim()
+    const name = key.slice('remote.'.length, key.length - '.url'.length)
+    return { name, url, repo: remoteRepoName(url) }
+  }
+
   const handlers = {
     '/git': async (request, response, url) => {
       const cwd = cwdFor(url.searchParams.get('sessionId') ?? undefined)
@@ -354,6 +397,7 @@ function registerRoutes(ctx, webServer) {
       const parsed = parseStatus(status.stdout)
       const top = await git(cwd, ['rev-parse', '--show-toplevel'], 8000)
       const head = await git(cwd, ['rev-parse', '--verify', 'HEAD'], 8000)
+      const remote = await readRemote(cwd)
       const files = parsed.entries.flatMap((entry) => describeEntries(entry))
       send(response, 200, {
         ok: true,
@@ -365,6 +409,7 @@ function registerRoutes(ctx, webServer) {
         born: parsed.born && head.ok,
         ahead: parsed.ahead,
         behind: parsed.behind,
+        remote,
         files,
         staged: files.filter((file) => file.staged).length,
         dirty: files.length,
@@ -493,9 +538,20 @@ function registerRoutes(ctx, webServer) {
       return result
     },
     push: async (cwd, body) => {
-      const args = ['push']
-      if (body?.setUpstream === true) args.push('--set-upstream', 'origin', 'HEAD')
-      return git(cwd, args, 120_000)
+      const remotes = await git(cwd, ['remote'], 8000)
+      const upstream = await git(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], 8000)
+      const plan = pushPlan({
+        url: typeof body?.url === 'string' ? body.url : '',
+        hasRemote: remotes.ok && remotes.stdout.trim().length > 0,
+        upstream: upstream.ok ? upstream.stdout.trim() : '',
+      })
+      if (plan === null) return { ok: false, error: 'remote required' }
+      let result
+      for (const [command, ...args] of plan) {
+        result = await git(cwd, [command, ...args], 120_000)
+        if (!result.ok) return result
+      }
+      return result
     },
     pull: async (cwd) => git(cwd, ['pull', '--no-rebase'], 120_000),
     fetch: async (cwd) => git(cwd, ['fetch', '--all', '--prune'], 120_000),
@@ -586,4 +642,15 @@ export function apply(ctx) {
 
 // Pure helpers and the argv templates they decode, exported so their contracts
 // stay testable outside the server.
-export { anchor, BRANCH_FORMAT, commitPlan, describeEntries, LOG_FORMAT, parseBranches, parseLog, parseStatus }
+export {
+  anchor,
+  BRANCH_FORMAT,
+  commitPlan,
+  describeEntries,
+  LOG_FORMAT,
+  parseBranches,
+  parseLog,
+  parseStatus,
+  pushPlan,
+  remoteRepoName,
+}

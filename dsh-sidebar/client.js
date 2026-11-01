@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
       'top.browser': '浏览器',
       'common.refresh': '刷新',
       'common.retry': '重试',
+      'common.cancel': '取消',
       'notes.title': '笔记',
       'notes.placeholder': '记下这个会话的临时想法、命令、待办…',
       'notes.saving': '保存中',
@@ -66,6 +67,8 @@ window.__ModuleLoader__.load({
       'git.ahead': '领先 {n}',
       'git.behind': '落后 {n}',
       'git.push': '推送',
+      'git.remotePlaceholder': '远端仓库地址（https://… 或 git@…）',
+      'git.remoteAdd': '添加并推送',
       'git.pull': '拉取',
       'git.fetch': '获取',
       'git.branchSwitch': '切换分支',
@@ -97,6 +100,7 @@ window.__ModuleLoader__.load({
       'top.browser': 'Browser',
       'common.refresh': 'Refresh',
       'common.retry': 'Retry',
+      'common.cancel': 'Cancel',
       'notes.title': 'Notes',
       'notes.placeholder': 'Scratch space for this session: ideas, commands, todos…',
       'notes.saving': 'Saving',
@@ -131,6 +135,8 @@ window.__ModuleLoader__.load({
       'git.ahead': '{n} ahead',
       'git.behind': '{n} behind',
       'git.push': 'Push',
+      'git.remotePlaceholder': 'Remote URL (https://… or git@…)',
+      'git.remoteAdd': 'Add and push',
       'git.pull': 'Pull',
       'git.fetch': 'Fetch',
       'git.branchSwitch': 'Switch branch',
@@ -473,6 +479,11 @@ window.__ModuleLoader__.load({
 .dshsb-commit-input::placeholder{color:var(--dsw-alias-label-secondary);opacity:.62}
 .dshsb-commit-btn{flex:0 0 22%;max-width:96px;height:32px;padding:0}
 .dshsb-actions{display:flex;align-items:center;gap:3px;padding:7px 8px 8px;flex:none;flex-wrap:wrap}
+.dshsb-actions-spacer{flex:1 1 auto}
+.dshsb-remote{flex:none;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-secondary)}
+.dshsb-remote-row{display:flex;align-items:center;gap:6px;padding:7px 8px 8px;flex:none}
+.dshsb-remote-input{flex:1 1 auto;min-width:0;height:26px}
 
 /* init card ------------------------------------------------------------- */
 .dshsb-init{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -637,6 +648,11 @@ window.__ModuleLoader__.load({
         status.behind ?? 0,
         rows.join(','),
       ].join('|')
+    }
+
+    /** Push must ask for a remote only for a repository that has none. */
+    function needsRemotePrompt(status) {
+      return status?.ok === true && !status.remote
     }
 
     const DEFAULT_SIZES = { notes: 208, history: 176 }
@@ -1086,6 +1102,8 @@ window.__ModuleLoader__.load({
       const [diff, setDiff] = React.useState(null)
       const [menu, setMenu] = React.useState(false)
       const [newBranch, setNewBranch] = React.useState('')
+      const [askRemote, setAskRemote] = React.useState(false)
+      const [remoteUrl, setRemoteUrl] = React.useState('')
       const [toast, showToast] = useToast()
 
       const run = React.useCallback(
@@ -1134,6 +1152,26 @@ window.__ModuleLoader__.load({
           if (result?.ok) {
             setMessage('')
             clearCommitDraft(sessionId)
+          }
+        })
+      }
+
+      // Push asks for a URL only when the repository has no remote yet.
+      const requestPush = () => {
+        if (needsRemotePrompt(status)) {
+          setAskRemote(true)
+          return
+        }
+        void run('push', {}, t('git.done'))
+      }
+
+      const submitRemote = () => {
+        const url = remoteUrl.trim()
+        if (url === '') return
+        void run('push', { url }, t('git.done')).then((result) => {
+          if (result?.ok) {
+            setAskRemote(false)
+            setRemoteUrl('')
           }
         })
       }
@@ -1315,30 +1353,74 @@ window.__ModuleLoader__.load({
                             diff ? h(DiffBlock, { text: diff.text, more: t('git.diffMore') }) : null,
                           ),
                   ),
-                  h(
-                    'div',
-                    { className: 'dshsb-actions' },
-                    h(Btn, {
-                      variant: 'quiet',
-                      glyph: Glyph.cloud,
-                      busy: busy === 'push',
-                      disabled: busy !== '',
-                      onClick: () => void run('push', {}, t('git.done')),
-                    }, t('git.push')),
-                    h(Btn, {
-                      variant: 'quiet',
-                      glyph: Glyph.down,
-                      disabled: busy !== '',
-                      onClick: () => void run('pull', {}, t('git.done')),
-                    }, t('git.pull')),
-                    h(Btn, {
-                      variant: 'quiet',
-                      glyph: Glyph.refresh,
-                      busy: busy === 'fetch',
-                      disabled: busy !== '',
-                      onClick: () => void run('fetch', {}, t('git.done')),
-                    }, t('git.fetch')),
-                  ),
+                  askRemote
+                    ? h(
+                        'div',
+                        { className: 'dshsb-remote-row' },
+                        h('input', {
+                          className: 'dshsb-field dshsb-remote-input',
+                          value: remoteUrl,
+                          spellCheck: false,
+                          placeholder: t('git.remotePlaceholder'),
+                          onChange: (event) => setRemoteUrl(event.target.value),
+                          onKeyDown: (event) => {
+                            if (event.key === 'Enter') submitRemote()
+                          },
+                        }),
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dshsb-btn dshsb-commit-btn',
+                            'data-variant': 'primary',
+                            disabled: remoteUrl.trim() === '' || busy !== '',
+                            onClick: submitRemote,
+                          },
+                          t('git.remoteAdd'),
+                        ),
+                        h(Btn, {
+                          variant: 'quiet',
+                          onClick: () => {
+                            setAskRemote(false)
+                            setRemoteUrl('')
+                          },
+                        }, t('common.cancel')),
+                      )
+                    : h(
+                        'div',
+                        { className: 'dshsb-actions' },
+                        h(Btn, {
+                          variant: 'quiet',
+                          glyph: Glyph.cloud,
+                          busy: busy === 'push',
+                          disabled: busy !== '',
+                          onClick: requestPush,
+                        }, t('git.push')),
+                        h(Btn, {
+                          variant: 'quiet',
+                          glyph: Glyph.down,
+                          disabled: busy !== '',
+                          onClick: () => void run('pull', {}, t('git.done')),
+                        }, t('git.pull')),
+                        h(Btn, {
+                          variant: 'quiet',
+                          glyph: Glyph.refresh,
+                          busy: busy === 'fetch',
+                          disabled: busy !== '',
+                          onClick: () => void run('fetch', {}, t('git.done')),
+                        }, t('git.fetch')),
+                        h('span', { className: 'dshsb-actions-spacer' }),
+                        status?.remote
+                          ? h(
+                              'span',
+                              {
+                                className: 'dshsb-remote',
+                                title: status.remote.url,
+                              },
+                              status.remote.repo || status.remote.name,
+                            )
+                          : null,
+                      ),
                 ),
 
         menu
@@ -1976,6 +2058,7 @@ window.__ModuleLoader__.load({
       __test: {
         bridgeRightbarLayout,
         gitFingerprint,
+        needsRemotePrompt,
         readRightbarLayout,
         sessionReady,
         shouldAutoOpenRightbar,

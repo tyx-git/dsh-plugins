@@ -49,7 +49,7 @@ The browser half calls these same-origin JSON routes; the host half owns them
 under one `ctx.effect`:
 
 ```
-GET  /dsh-sidebar/git?sessionId=            branch, upstream, ahead/behind, changes
+GET  /dsh-sidebar/git?sessionId=            branch, upstream, ahead/behind, remote, changes
 GET  /dsh-sidebar/git/log?sessionId&limit   recent commits with their parents
 GET  /dsh-sidebar/git/branches?sessionId=   local branches
 GET  /dsh-sidebar/git/diff?sessionId&path&staged
@@ -58,6 +58,22 @@ POST /dsh-sidebar/git                       init | stage | unstage | discard | c
 GET  /dsh-sidebar/notes?sessionId=          the Session's notes
 POST /dsh-sidebar/notes                     replace them
 ```
+
+## Push and the remote
+
+`push` carries an optional `url`. The host builds one plan from three facts —
+whether a remote exists, whether the branch has an upstream, and the URL:
+
+| state | commands |
+| --- | --- |
+| remote + upstream | `git push` |
+| remote, no upstream | `git push --set-upstream origin HEAD` |
+| no remote, URL supplied | `git remote add origin <url>` then the upstream push |
+| no remote, no URL | refused (`remote required`) |
+
+The pane asks for the URL only when the repository has no remote, and otherwise
+shows the remote's repository name at the right end of the push row (derived
+from the URL; the full URL is the tooltip).
 
 A file path is re-anchored on the Session's working directory and refused when
 it escapes; a request whose `Origin` names another host is refused too. Notes
@@ -97,6 +113,7 @@ pwsh -NoProfile -File test/commit-untracked-regression.ps1  # untracked-file com
 node test/commit-draft-regression.mjs  # Session-scoped commit-message draft contract
 node test/rightbar-layout-regression.mjs  # right column width/open-state memory
 node test/git-freshness-regression.mjs  # Session-ready gate + live status fingerprint
+node test/remote-push-regression.mjs  # remote discovery, push plan, remote-name label
 ```
 
 ## Limits
