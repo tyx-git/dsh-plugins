@@ -1,0 +1,11 @@
+# Local scratch directories (asar extraction, reproduction repos, probe output).
+.tmp*/
+.tmp-check*/
+
+# A workspace install exists only when someone runs pnpm here; the profile owns
+# the real install, so these never belong to the repository.
+node_modules/
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db

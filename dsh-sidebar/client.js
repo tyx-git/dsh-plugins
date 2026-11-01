@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     const ID = 'dsh-sidebar.panel'
     const ENDPOINT = '/dsh-sidebar'
     const SIZES_KEY = 'dsh-sidebar:sizes:v1'
+    /** Workspace edits must show up on their own; one cheap status probe per tick. */
+    const GIT_POLL_MS = 2000
 
     // ── copy ────────────────────────────────────────────────────────────────
     const zh = {
@@ -612,6 +614,30 @@ window.__ModuleLoader__.load({
 
     // ── helpers ─────────────────────────────────────────────────────────────
     const clamp = (value, min, max) => Math.round(Math.min(max, Math.max(min, value)))
+
+    /** Git state is only meaningful once the Session's history is open or settled. */
+    function sessionReady(openState) {
+      return openState === 'open' || openState === 'error'
+    }
+
+    /**
+     * One stable verdict string per Git status, so a poll can skip a full reload.
+     * Covers everything the pane paints: the repository verdict, the branch, the
+     * tracking counts, and each path with its index/worktree codes.
+     */
+    function gitFingerprint(status) {
+      if (!status) return ''
+      if (status.ok === false) return `no:${status.reason ?? 'failed'}`
+      const files = Array.isArray(status.files) ? status.files : []
+      const rows = files.map((file) => `${file.staged ? 'i' : 'w'}:${file.code}:${file.path}`)
+      return [
+        status.branch ?? '',
+        status.detached === true ? 'detached' : '',
+        status.ahead ?? 0,
+        status.behind ?? 0,
+        rows.join(','),
+      ].join('|')
+    }
 
     const DEFAULT_SIZES = { notes: 208, history: 176 }
 
@@ -1693,7 +1719,7 @@ window.__ModuleLoader__.load({
 
     // ── panel ───────────────────────────────────────────────────────────────
     function Workbench(props) {
-      const { sessionId, t } = props
+      const { sessionId, t, useSession } = props
       const [sizes, setSizes] = React.useState(readSizes)
       const [browserOpen, setBrowserOpen] = React.useState(false)
       const [status, setStatus] = React.useState(null)
@@ -1701,6 +1727,14 @@ window.__ModuleLoader__.load({
       const [logError, setLogError] = React.useState('')
       const [branches, setBranches] = React.useState([])
       const panelRef = React.useRef(null)
+      const fingerprint = React.useRef('')
+
+      // The Host cannot answer for a Session whose history has not opened yet; asking
+      // early is what reported the app's own directory as "not a repository".
+      const openState = typeof useSession === 'function'
+        ? useSession((snapshot) => snapshot.openState)
+        : 'open'
+      const ready = sessionReady(openState)
 
       React.useEffect(() => {
         try {
@@ -1716,6 +1750,7 @@ window.__ModuleLoader__.load({
           api.log(sessionId).catch(() => ({ commits: [] })),
           api.branches(sessionId).catch(() => ({ branches: [] })),
         ])
+        fingerprint.current = gitFingerprint(nextStatus)
         setStatus(nextStatus)
         setCommits(Array.isArray(nextLog?.commits) ? nextLog.commits : [])
         setLogError(
@@ -1726,9 +1761,35 @@ window.__ModuleLoader__.load({
         setBranches(Array.isArray(nextBranches?.branches) ? nextBranches.branches : [])
       }, [sessionId])
 
+      /** Cheap probe: only a changed verdict pays for the full reload. */
+      const probe = React.useCallback(async () => {
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+        const nextStatus = await api.status(sessionId).catch(() => null)
+        if (!nextStatus || gitFingerprint(nextStatus) === fingerprint.current) return
+        await reload()
+      }, [reload, sessionId])
+
       React.useEffect(() => {
+        if (!ready) return
         void reload()
-      }, [reload])
+        const timer = window.setInterval(() => void probe(), GIT_POLL_MS)
+        return () => window.clearInterval(timer)
+      }, [ready, reload, probe])
+
+      // Returning to the window is a user-visible moment: refresh at once instead
+      // of waiting for the next tick.
+      React.useEffect(() => {
+        if (!ready) return
+        const refresh = () => {
+          if (document.visibilityState === 'visible') void probe()
+        }
+        window.addEventListener('focus', refresh)
+        document.addEventListener('visibilitychange', refresh)
+        return () => {
+          window.removeEventListener('focus', refresh)
+          document.removeEventListener('visibilitychange', refresh)
+        }
+      }, [ready, probe])
 
       const panelHeight = () => panelRef.current?.clientHeight ?? 640
 
@@ -1912,7 +1973,13 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots'],
       apply,
-      __test: { bridgeRightbarLayout, readRightbarLayout, shouldAutoOpenRightbar },
+      __test: {
+        bridgeRightbarLayout,
+        gitFingerprint,
+        readRightbarLayout,
+        sessionReady,
+        shouldAutoOpenRightbar,
+      },
     }
   },
 })

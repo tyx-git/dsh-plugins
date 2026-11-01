@@ -22,8 +22,15 @@ const check = (label, actual, expected) => {
 
 const count = (source, pattern) => (source.match(pattern) ?? []).length
 
-for (const [name, source] of [['client', client], ['host', host]]) {
-  check(`${name}: no setInterval`, count(source, /setInterval\s*\(/g), 0)
+for (const name of ['client', 'host']) {
+  const source = name === 'client' ? client : host
+  // An interval is allowed where the feature needs one (the Git freshness probe);
+  // what must hold is that every interval it starts is also cleared.
+  check(
+    `${name}: every interval is cleared`,
+    count(source, /clearInterval\s*\(/g) >= count(source, /setInterval\s*\(/g),
+    true,
+  )
   check(`${name}: every addEventListener is removed`, count(source, /addEventListener\s*\(/g), count(source, /removeEventListener\s*\(/g))
 }
 

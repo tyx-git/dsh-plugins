@@ -15,6 +15,25 @@ focus it and press ↑/↓) to resize, and the sizes are remembered in
 `localStorage` under `dsh-sidebar:sizes:v1`. The git pane is the grow pane; the
 fixed panes clamp so it always keeps a 168 px floor.
 
+## When the Git pane reads the repository
+
+Two ordering rules keep the pane truthful:
+
+1. **Wait for the Session.** The first read happens only once the Session's
+   history is open (`useSession(...).openState`), because before that the Host
+   cannot resolve that Session's working directory and would answer for the app's
+   own install directory instead.
+2. **Stay current.** While the pane is mounted it probes the cheap status route
+   every 2 s (only when the document is visible, and immediately on window focus)
+   and compares a fingerprint of the verdict: branch, ahead/behind, and every
+   path with its index/worktree codes. A full reload — status, log and branches —
+   runs only when that fingerprint actually changes, so an edit made elsewhere in
+   the workspace appears without clicking refresh.
+
+The probe is polling, not a watcher, on purpose: the shipped
+`remote.workspaceFiles.changes` stream watches **one directory's direct entries**
+(see its README), so a repo-wide watch would need one stream per directory.
+
 ## Typography
 
 No type value is written by hand. The panel sets
@@ -60,6 +79,8 @@ Everything the panel starts is owned by something that ends:
 - The right column's width and open state are remembered in
   `dsh-sidebar:rightbar-layout:v1`; writes are debounced because the frame
   reports a width every animation frame while dragging.
+- The Git pane's freshness probe is one `setInterval` per mounted pane plus a
+  focus/visibility pair of listeners, both removed on unmount.
 - Host: one route registration owned by one effect, no module-level caches.
 
 Known limits: the notes store is a single JSON file rewritten synchronously on
@@ -75,6 +96,7 @@ node test/resource-test.mjs   # timer/subscription balance, cache caps, single r
 pwsh -NoProfile -File test/commit-untracked-regression.ps1  # untracked-file commit integration case
 node test/commit-draft-regression.mjs  # Session-scoped commit-message draft contract
 node test/rightbar-layout-regression.mjs  # right column width/open-state memory
+node test/git-freshness-regression.mjs  # Session-ready gate + live status fingerprint
 ```
 
 ## Limits
