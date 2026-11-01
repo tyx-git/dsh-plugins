@@ -57,6 +57,9 @@ Everything the panel starts is owned by something that ends:
 - The stylesheet is injected once per page through `ctx.effect` and removed on
   dispose, instead of one `<style>` per mounted Session view.
 - Diffs render at most 400 lines, with a `… 还有 N 行` tail.
+- The right column's width and open state are remembered in
+  `dsh-sidebar:rightbar-layout:v1`; writes are debounced because the frame
+  reports a width every animation frame while dragging.
 - Host: one route registration owned by one effect, no module-level caches.
 
 Known limits: the notes store is a single JSON file rewritten synchronously on
@@ -71,10 +74,15 @@ node test/style-test.mjs      # stylesheet balance, theme-token-only colours, cl
 node test/resource-test.mjs   # timer/subscription balance, cache caps, single route registration
 pwsh -NoProfile -File test/commit-untracked-regression.ps1  # untracked-file commit integration case
 node test/commit-draft-regression.mjs  # Session-scoped commit-message draft contract
+node test/rightbar-layout-regression.mjs  # right column width/open-state memory
 ```
 
 ## Limits
 
+- The right column's width memory bridges `ctx.get('layout').panels`, the action
+  object the frame's resize handle writes. That object is not part of the public
+  Client layout contract, so a future Harness release could rename it; the bridge
+  turns itself off (and keeps working) when the shape is missing.
 - A site that sends `X-Frame-Options: DENY` or a restrictive `frame-ancestors`
   renders blank in the browser pane; that is the target's policy, not a defect.
 - Git actions run the `git` executable from the host process's `PATH`. Without

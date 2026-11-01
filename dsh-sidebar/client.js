@@ -658,6 +658,104 @@ window.__ModuleLoader__.load({
       }
     }
 
+    const RIGHTBAR_LAYOUT_KEY = 'dsh-sidebar:rightbar-layout:v1'
+    /** Width writes arrive once per animation frame while dragging. */
+    const RIGHTBAR_PERSIST_DELAY = 250
+
+    /** @returns the remembered column layout, or null on first run. */
+    function readRightbarLayout() {
+      try {
+        const raw = window.localStorage.getItem(RIGHTBAR_LAYOUT_KEY)
+        const parsed = raw ? JSON.parse(raw) : null
+        if (!parsed || typeof parsed !== 'object') return null
+        const width = Number(parsed.width)
+        return {
+          width: Number.isFinite(width) && width > 0 ? width : null,
+          shown: parsed.shown === true ? true : parsed.shown === false ? false : null,
+        }
+      } catch {
+        return null
+      }
+    }
+
+    function writeRightbarLayout(value) {
+      try {
+        window.localStorage.setItem(RIGHTBAR_LAYOUT_KEY, JSON.stringify(value))
+      } catch {
+        // localStorage is optional; the column still resizes for this run.
+      }
+    }
+
+    /** A column the user closed stays closed; an unknown state keeps the default. */
+    function shouldAutoOpenRightbar() {
+      return readRightbarLayout()?.shown !== false
+    }
+
+    /**
+     * Remember the shipped right column's width and open state.
+     *
+     * The layout store of `@deepseek-ai/dsh-client-ui-layout` is not persisted,
+     * so its first `openRightbar` falls back to 45% of the viewport. This bridges
+     * the controller's own action object — the same one the frame's resize handle
+     * writes — to replay the last width before that first open and to learn every
+     * later change. Teardown restores the original methods.
+     * @param layout - the Client `layout` service, if mounted.
+     * @returns idempotent disposer.
+     */
+    function bridgeRightbarLayout(layout) {
+      const panels = layout?.panels
+      if (!panels || typeof panels.setRightbar !== 'function') return () => {}
+
+      const original = {
+        setRightbar: panels.setRightbar,
+        openRightbar: panels.openRightbar,
+        closeRightbar: panels.closeRightbar,
+      }
+      const saved = readRightbarLayout()
+      let width = saved?.width ?? null
+      let shown = saved?.shown ?? null
+      let timer = 0
+
+      // Seed the preference first: `rightbar ??= 45%` only assigns when unset.
+      if (width !== null) original.setRightbar(width)
+
+      const persist = () => writeRightbarLayout({ width, shown })
+      const schedule = () => {
+        window.clearTimeout(timer)
+        timer = window.setTimeout(persist, RIGHTBAR_PERSIST_DELAY)
+      }
+
+      const wrapped = {
+        setRightbar: (px) => {
+          original.setRightbar(px)
+          width = px
+          schedule()
+        },
+        openRightbar: (track, fullscreen) => {
+          original.openRightbar(track, fullscreen)
+          shown = true
+          schedule()
+        },
+        closeRightbar: () => {
+          original.closeRightbar()
+          shown = false
+          schedule()
+        },
+      }
+
+      panels.setRightbar = wrapped.setRightbar
+      panels.openRightbar = wrapped.openRightbar
+      panels.closeRightbar = wrapped.closeRightbar
+
+      return () => {
+        window.clearTimeout(timer)
+        // Only unwind what this bridge still owns.
+        if (panels.setRightbar === wrapped.setRightbar) panels.setRightbar = original.setRightbar
+        if (panels.openRightbar === wrapped.openRightbar) panels.openRightbar = original.openRightbar
+        if (panels.closeRightbar === wrapped.closeRightbar) panels.closeRightbar = original.closeRightbar
+      }
+    }
+
     function useToast() {
       const [toast, setToast] = React.useState(null)
       const timer = React.useRef(0)
@@ -1706,6 +1804,9 @@ window.__ModuleLoader__.load({
      * early is retried briefly instead of being lost.
      */
     function autoOpen(ctx) {
+      // The user closed the column last time: keep it closed instead of forcing
+      // a fresh tab (which would expand it at the 45% default again).
+      if (!shouldAutoOpenRightbar()) return
       const controller = ctx.get?.('sidebarRight')
       if (!controller || typeof controller.openTabIn !== 'function') return
 
@@ -1794,6 +1895,13 @@ window.__ModuleLoader__.load({
           'dsh-sidebar: tab body',
         )
 
+        // Must install before anything opens the column: the replay inside the
+        // bridge is what keeps the first open from falling back to 45%.
+        scope.effect(
+          () => bridgeRightbarLayout(scope.get?.('layout')),
+          'dsh-sidebar: rightbar layout memory',
+        )
+
         scope.effect(() => autoOpen(scope), 'dsh-sidebar: auto open')
       }
 
@@ -1801,6 +1909,10 @@ window.__ModuleLoader__.load({
       else install(ctx)
     }
 
-    return { inject: ['slots'], apply }
+    return {
+      inject: ['slots'],
+      apply,
+      __test: { bridgeRightbarLayout, readRightbarLayout, shouldAutoOpenRightbar },
+    }
   },
 })
